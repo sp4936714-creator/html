@@ -22,59 +22,129 @@ button { padding:5px 10px; font-size:14px; cursor:pointer; margin-top:5px; }
 }
 #controls { display:flex; flex-direction:column; }
 </style>
-  <meta charset="UTF-8">
-  <title>Пошаговая игра с очками и звуком</title>
-  <style>
-    body { font-family: Arial; margin:0; padding:0; display:flex; flex-direction:column; align-items:center; }
-    #menu { margin-top:50px; border:1px solid #aaa; padding:20px; border-radius:8px; background:#f0f0f0; }
-    #boardWrapper { position:relative; margin-top:20px; display:none; }
-    table { border-collapse:collapse; }
-    td { width:50px; height:50px; border:1px solid black; background:white; }
-    .cursor { outline:4px solid orange; }
-    #floating { position:absolute; width:50px; height:50px; border:1px solid black; display:none; }
-    #topBar { width:100%; display:flex; justify-content:space-between; padding:10px; display:none; align-items:center; }
-    #scoreBoard { font-weight:bold; font-size:16px; margin-right:20px; }
-    button { padding:5px 10px; font-size:14px; cursor:pointer; margin-top:5px; }
-    #info { margin-top:10px; font-weight:bold; display:none; }
-    #gameOverOverlay {
-      position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7);
-      color:white; font-size:24px; display:flex; flex-direction:column; justify-content:center; align-items:center;
-      display:none;
-    }
-    #controls { display:flex; flex-direction:column; }
-  </style>
 </head>
 <body>
 
-@@ -140,85 +140,104 @@
+<div id="menu">
+  <h2>Настройки игры</h2>
+  <label>Ряды: <input type="number" id="inputRows" value="7"></label><br><br>
+  <label>Столбцы: <input type="number" id="inputCols" value="7"></label><br><br>
+  <label>Цвета (через запятую): <input type="text" id="inputColors" value="blue,red,green,yellow,purple"></label><br><br>
+  <label>Клеток за ход: <input type="number" id="inputCellsPerMove" value="3"></label><br><br>
+  <label>Начальных клеток: <input type="number" id="inputInitialCells" value="2"></label><br><br>
+  <button id="startBtn">Старт</button>
+</div>
+
+<div id="topBar">
+  <div id="scoreBoard"></div>
+  <div id="controls">
+    <button id="resetBtn">Заново</button>
+    <button id="soundBtn">Звук: ВКЛ</button>
+  </div>
+</div>
+
+<div id="boardWrapper">
+  <table id="gameTable"></table>
+  <div id="floating"></div>
+</div>
+
+<div id="info">СЦЕНА: ХОД ИГРОКА</div>
+<div id="gameOverOverlay">
+  <div id="gameOverText"></div>
+  <button id="gameOverReset">Заново</button>
+</div>
+
+<script>
+// ------------------- НАСТРОЙКИ И ПЕРЕМЕННЫЕ -------------------
+let gameConfig = {};
+const table = document.getElementById("gameTable");
+const floating = document.getElementById("floating");
+const info = document.getElementById("info");
+const menu = document.getElementById("menu");
+const boardWrapper = document.getElementById("boardWrapper");
+const topBar = document.getElementById("topBar");
+const scoreBoard = document.getElementById("scoreBoard");
+const gameOverOverlay = document.getElementById("gameOverOverlay");
+const gameOverText = document.getElementById("gameOverText");
+const gameOverReset = document.getElementById("gameOverReset");
+const soundBtn = document.getElementById("soundBtn");
+
+let selectedCol=0;
+let scene="player_pick";
+let carriedColor=null;
+let originCol=null;
+let originRow=null;
+let animationTimeouts=[];
+let score = 0;
+let gameOver = false;
+let highScore = 0;
+let isStandardGame = false;
+let soundEnabled = localStorage.getItem("soundEnabled");
+soundEnabled = soundEnabled===null ? true : (soundEnabled==="true");
+updateSoundButton();
+
+soundBtn.addEventListener("click", () => {
+  soundEnabled = !soundEnabled;
+  localStorage.setItem("soundEnabled", soundEnabled);
+  updateSoundButton();
+});
+function updateSoundButton(){ soundBtn.textContent = soundEnabled ? "Звук: ВКЛ" : "Звук: ВЫКЛ"; }
+
+function playSound(freq=600,dur=0.05,vol=0.1){ if(!soundEnabled) return; const ctx=new (window.AudioContext||window.webkitAudioContext)(); const o=ctx.createOscillator(); const g=ctx.createGain(); o.type="square"; o.frequency.value=freq; o.connect(g); g.connect(ctx.destination); g.gain.setValueAtTime(vol,ctx.currentTime); o.start(); o.stop(ctx.currentTime+dur); }
+
+// ------------------- ФУНКЦИИ ТАБЛИЦЫ -------------------
+function createTable(){
+  table.innerHTML="";
+  for(let r=0;r<gameConfig.rows;r++){
+    const row=document.createElement("tr");
+    for(let c=0;c<gameConfig.cols;c++){
+      const cell=document.createElement("td");
+      row.appendChild(cell);
+    }
+    table.appendChild(row);
+  }
+}
+function getColor(r,c){ return table.rows[r].cells[c].style.backgroundColor || null; }
+function setColor(r,c,color){ table.rows[r].cells[c].style.backgroundColor=color||""; }
+function highlightColumn(){ for(let r=0;r<gameConfig.rows;r++) for(let c=0;c<gameConfig.cols;c++) table.rows[r].cells[c].classList.remove("cursor"); table.rows[0].cells[selectedCol].classList.add("cursor"); }
+function findDropRow(col){ for(let r=gameConfig.rows-1;r>=0;r--) if(!getColor(r,col)) return r; return -1; }
+
+// ------------------- ПОИСК -------------------
+function findMatches(){
+  let toRemove=new Set();
+  const dirs=[[0,1],[1,0],[1,1],[1,-1]];
+  for(let r=0;r<gameConfig.rows;r++){
+    for(let c=0;c<gameConfig.cols;c++){
+      const color=getColor(r,c);
+      if(!color) continue;
+      for(let [dr,dc] of dirs){
+        let cells=[[r,c]];
+        for(let k=1;k<5;k++){
+          const nr=r+dr*k, nc=c+dc*k;
+          if(nr<0||nr>=gameConfig.rows||nc<0||nc>=gameConfig.cols) break;
+          if(getColor(nr,nc)===color) cells.push([nr,nc]);
+          else break;
+        }
+        if(cells.length>=3) cells.forEach(cell=>toRemove.add(cell.join(",")));
+      }
+    }
+  }
+  return Array.from(toRemove).map(x=>x.split(",").map(Number));
+}
+function applyGravity(){ for(let c=0;c<gameConfig.cols;c++){ let stack=[]; for(let r=gameConfig.rows-1;r>=0;r--) if(getColor(r,c)) stack.push(getColor(r,c)); for(let r=gameConfig.rows-1;r>=0;r--) setColor(r,c,stack[gameConfig.rows-1-r]||null); } }
+
+// ------------------- КОНЕЦ ИГРЫ -------------------
+function checkGameOver(){
+  for(let c=0;c<gameConfig.cols;c++){
+    if(getColor(0,c)){
       gameOver=true;
       gameOverText.textContent="Игра окончена! Ваш счёт: "+(isStandardGame?score:"-");
       gameOverOverlay.style.display="flex";
       if(isStandardGame) saveHighScore(score);
-      if(isStandardGame) {
-          saveHighScore(score);
-          sendScore(score); // --- отправка очков на сервер
-      }
       return true;
     }
   }
   return false;
-}
-
-// ------------------- ОТПРАВКА ОЧКОВ НА СЕРВЕР (добавлено) -------------------
-function sendScore(score) {
-  fetch("http://127.0.0.1:5000/score", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ score: score })
-  })
-    .then(res => res.json())
-    .then(data => {
-      console.log("Сервер ответил: ", data);
-    })
-    .catch(err => {
-      console.error("Ошибка отправки на сервер:", err);
-    });
 }
 
 // ------------------- РЕКОРД -------------------
