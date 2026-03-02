@@ -55,6 +55,14 @@
 </div>
 
 <script>
+// ------------------- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ПЕРЕМЕШИВАНИЯ -------------------
+function shuffle(array){
+  for(let i=array.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [array[i],array[j]] = [array[j],array[i]];
+  }
+}
+
 // ------------------- НАСТРОЙКИ И ПЕРЕМЕННЫЕ -------------------
 let gameConfig = {};
 const table = document.getElementById("gameTable");
@@ -200,7 +208,33 @@ function initBoard(n){
   scoreBoard.textContent=isStandardGame?("Очки: "+score+" | Рекорд: "+highScore):"";
   gameOver=false; gameOverOverlay.style.display="none";
 
-  let placed=0; while(placed<n){ const col=Math.floor(Math.random()*gameConfig.cols); const color=gameConfig.colors[Math.floor(Math.random()*gameConfig.colors.length)]; const row=findDropRow(col); if(row===-1) continue; setColor(row,col,color); if(findMatches().length===0) placed++; else setColor(row,col,null); }
+  // --- Улучшенная генерация начальных клеток ---
+  let positions = [];
+  for(let c=0;c<gameConfig.cols;c++)
+    for(let r=0;r<gameConfig.rows;r++)
+      positions.push([r, c]);
+
+  shuffle(positions);
+
+  let placed = 0;
+  let possibleColors = [];
+  // используем перемешанные цвета для разнообразия, если клеток больше цветов — повторяем цвета
+  for(let i = 0; i < n; i++)
+    possibleColors.push(gameConfig.colors[Math.floor(Math.random() * gameConfig.colors.length)]);
+  shuffle(possibleColors);
+
+  // ставим случайные цвета в случайные позиции, не допуская совпадений
+  for(let i=0; placed < n && i < positions.length; i++) {
+    const [row, col] = positions[i];
+    if(!getColor(row, col)){
+      const color = possibleColors[placed];
+      setColor(row, col, color);
+      if(findMatches().length === 0) placed++;
+      else setColor(row, col, null);
+    }
+  }
+  // --- конец генерации ---
+
   checkGameOver();
 }
 
