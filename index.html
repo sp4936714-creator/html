@@ -1,6 +1,27 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+<meta charset="UTF-8">
+<title>Пошаговая игра с очками и звуком</title>
+<style>
+body { font-family: Arial; margin:0; padding:0; display:flex; flex-direction:column; align-items:center; }
+#menu { margin-top:50px; border:1px solid #aaa; padding:20px; border-radius:8px; background:#f0f0f0; }
+#boardWrapper { position:relative; margin-top:20px; display:none; }
+table { border-collapse:collapse; }
+td { width:50px; height:50px; border:1px solid black; background:white; }
+.cursor { outline:4px solid orange; }
+#floating { position:absolute; width:50px; height:50px; border:1px solid black; display:none; }
+#topBar { width:100%; display:flex; justify-content:space-between; padding:10px; display:none; align-items:center; }
+#scoreBoard { font-weight:bold; font-size:16px; margin-right:20px; }
+button { padding:5px 10px; font-size:14px; cursor:pointer; margin-top:5px; }
+#info { margin-top:10px; font-weight:bold; display:none; }
+#gameOverOverlay {
+  position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7);
+  color:white; font-size:24px; display:flex; flex-direction:column; justify-content:center; align-items:center;
+  display:none;
+}
+#controls { display:flex; flex-direction:column; }
+</style>
   <meta charset="UTF-8">
   <title>Пошаговая игра с очками и звуком</title>
   <style>
@@ -25,132 +46,14 @@
 </head>
 <body>
 
-<div id="menu">
-  <h2>Настройки игры</h2>
-  <label>Ряды: <input type="number" id="inputRows" value="7"></label><br><br>
-  <label>Столбцы: <input type="number" id="inputCols" value="7"></label><br><br>
-  <label>Цвета (через запятую): <input type="text" id="inputColors" value="blue,red,green,yellow,purple"></label><br><br>
-  <label>Клеток за ход: <input type="number" id="inputCellsPerMove" value="3"></label><br><br>
-  <label>Начальных клеток: <input type="number" id="inputInitialCells" value="2"></label><br><br>
-  <button id="startBtn">Старт</button>
-</div>
-
-<div id="topBar">
-  <div id="scoreBoard"></div>
-  <div id="controls">
-    <button id="resetBtn">Заново</button>
-    <button id="soundBtn">Звук: ВКЛ</button>
-  </div>
-</div>
-
-<div id="boardWrapper">
-  <table id="gameTable"></table>
-  <div id="floating"></div>
-</div>
-
-<div id="info">СЦЕНА: ХОД ИГРОКА</div>
-<div id="gameOverOverlay">
-  <div id="gameOverText"></div>
-  <button id="gameOverReset">Заново</button>
-</div>
-
-<script>
-// ------------------- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ПЕРЕМЕШИВАНИЯ -------------------
-function shuffle(array){
-  for(let i=array.length-1;i>0;i--){
-    const j=Math.floor(Math.random()*(i+1));
-    [array[i],array[j]] = [array[j],array[i]];
-  }
-}
-
-// ------------------- НАСТРОЙКИ И ПЕРЕМЕННЫЕ -------------------
-let gameConfig = {};
-const table = document.getElementById("gameTable");
-const floating = document.getElementById("floating");
-const info = document.getElementById("info");
-const menu = document.getElementById("menu");
-const boardWrapper = document.getElementById("boardWrapper");
-const topBar = document.getElementById("topBar");
-const scoreBoard = document.getElementById("scoreBoard");
-const gameOverOverlay = document.getElementById("gameOverOverlay");
-const gameOverText = document.getElementById("gameOverText");
-const gameOverReset = document.getElementById("gameOverReset");
-const soundBtn = document.getElementById("soundBtn");
-
-let selectedCol=0;
-let scene="player_pick";
-let carriedColor=null;
-let originCol=null;
-let originRow=null;
-let animationTimeouts=[];
-let score = 0;
-let gameOver = false;
-let highScore = 0;
-let isStandardGame = false;
-let soundEnabled = localStorage.getItem("soundEnabled");
-soundEnabled = soundEnabled===null ? true : (soundEnabled==="true");
-updateSoundButton();
-
-soundBtn.addEventListener("click", () => {
-  soundEnabled = !soundEnabled;
-  localStorage.setItem("soundEnabled", soundEnabled);
-  updateSoundButton();
-});
-function updateSoundButton(){ soundBtn.textContent = soundEnabled ? "Звук: ВКЛ" : "Звук: ВЫКЛ"; }
-
-function playSound(freq=600,dur=0.05,vol=0.1){ if(!soundEnabled) return; const ctx=new (window.AudioContext||window.webkitAudioContext)(); const o=ctx.createOscillator(); const g=ctx.createGain(); o.type="square"; o.frequency.value=freq; o.connect(g); g.connect(ctx.destination); g.gain.setValueAtTime(vol,ctx.currentTime); o.start(); o.stop(ctx.currentTime+dur); }
-
-// ------------------- ФУНКЦИИ ТАБЛИЦЫ -------------------
-function createTable(){
-  table.innerHTML="";
-  for(let r=0;r<gameConfig.rows;r++){
-    const row=document.createElement("tr");
-    for(let c=0;c<gameConfig.cols;c++){
-      const cell=document.createElement("td");
-      row.appendChild(cell);
-    }
-    table.appendChild(row);
-  }
-}
-function getColor(r,c){ return table.rows[r].cells[c].style.backgroundColor || null; }
-function setColor(r,c,color){ table.rows[r].cells[c].style.backgroundColor=color||""; }
-function highlightColumn(){ for(let r=0;r<gameConfig.rows;r++) for(let c=0;c<gameConfig.cols;c++) table.rows[r].cells[c].classList.remove("cursor"); table.rows[0].cells[selectedCol].classList.add("cursor"); }
-function findDropRow(col){ for(let r=gameConfig.rows-1;r>=0;r--) if(!getColor(r,col)) return r; return -1; }
-
-// ------------------- ПОИСК -------------------
-function findMatches(){
-  let toRemove=new Set();
-  const dirs=[[0,1],[1,0],[1,1],[1,-1]];
-  for(let r=0;r<gameConfig.rows;r++){
-    for(let c=0;c<gameConfig.cols;c++){
-      const color=getColor(r,c);
-      if(!color) continue;
-      for(let [dr,dc] of dirs){
-        let cells=[[r,c]];
-        for(let k=1;k<5;k++){
-          const nr=r+dr*k, nc=c+dc*k;
-          if(nr<0||nr>=gameConfig.rows||nc<0||nc>=gameConfig.cols) break;
-          if(getColor(nr,nc)===color) cells.push([nr,nc]);
-          else break;
-        }
-        if(cells.length>=3) cells.forEach(cell=>toRemove.add(cell.join(",")));
-      }
-    }
-  }
-  return Array.from(toRemove).map(x=>x.split(",").map(Number));
-}
-function applyGravity(){ for(let c=0;c<gameConfig.cols;c++){ let stack=[]; for(let r=gameConfig.rows-1;r>=0;r--) if(getColor(r,c)) stack.push(getColor(r,c)); for(let r=gameConfig.rows-1;r>=0;r--) setColor(r,c,stack[gameConfig.rows-1-r]||null); } }
-
-// ------------------- КОНЕЦ ИГРЫ -------------------
-function checkGameOver(){
-  for(let c=0;c<gameConfig.cols;c++){
-    if(getColor(0,c)){
+@@ -140,85 +140,104 @@
       gameOver=true;
       gameOverText.textContent="Игра окончена! Ваш счёт: "+(isStandardGame?score:"-");
       gameOverOverlay.style.display="flex";
+      if(isStandardGame) saveHighScore(score);
       if(isStandardGame) {
           saveHighScore(score);
-          sendScore(score);
+          sendScore(score); // --- отправка очков на сервер
       }
       return true;
     }
@@ -158,7 +61,7 @@ function checkGameOver(){
   return false;
 }
 
-// ------------------- ОТПРАВКА ОЧКОВ НА СЕРВЕР -------------------
+// ------------------- ОТПРАВКА ОЧКОВ НА СЕРВЕР (добавлено) -------------------
 function sendScore(score) {
   fetch("http://127.0.0.1:5000/score", {
     method: "POST",
@@ -181,87 +84,22 @@ function saveHighScore(score){ if(score>highScore){ highScore=score; localStorag
 // ------------------- ПОЗИЦИИ -------------------
 function cellPosition(r,c){ const rect=table.rows[r].cells[c].getBoundingClientRect(); const wrap=boardWrapper.getBoundingClientRect(); return {x:rect.left-wrap.left, y:rect.top-wrap.top}; }
 
-// ------------------- ГЕНЕРАЦИЯ КЛЕТОК С АНИМАЦИЕЙ -------------------
-function generateCellWithFall(callback, col, color) {
+// ------------------- ГЕНЕРАЦИЯ -------------------
+function generateCellWithFall(callback){
   if(gameOver) return;
-  if(typeof col === 'undefined')
-    col = Math.floor(Math.random()*gameConfig.cols);
-  if(typeof color === 'undefined')
-    color = gameConfig.colors[Math.floor(Math.random()*gameConfig.colors.length)];
-  const row = findDropRow(col);
-  if(row === -1){ if(callback) callback(); return; }
+  const col=Math.floor(Math.random()*gameConfig.cols);
+  const color=gameConfig.colors[Math.floor(Math.random()*gameConfig.colors.length)];
+  const row=findDropRow(col); if(row===-1){ if(callback) callback(); return; }
   const startPos={x:cellPosition(0,col).x, y:cellPosition(0,col).y-60};
   const endPos=cellPosition(row,col);
-  floating.style.left=startPos.x+"px";
-  floating.style.top=startPos.y+"px";
-  floating.style.backgroundColor=color;
-  floating.style.display="block";
+  floating.style.left=startPos.x+"px"; floating.style.top=startPos.y+"px"; floating.style.backgroundColor=color; floating.style.display="block";
   playSound(600,0.05,0.1);
-  scene="animating";
-  const duration=400;
-  const steps=20;
-  let step=0;
-  const deltaY=(endPos.y-startPos.y)/steps;
-  function animateStep(){
-    if(step<steps){
-      floating.style.top=(startPos.y+deltaY*step)+"px";
-      step++;
-      animationTimeouts.push(setTimeout(animateStep,duration/steps));
-    }
-    else{
-      setColor(row,col,color);
-      floating.style.display="none";
-      if(callback) callback();
-      scene="player_pick";
-      checkGameOver();
-    }
-  }
+  scene="animating"; const duration=400; const steps=20; let step=0; const deltaY=(endPos.y-startPos.y)/steps;
+  function animateStep(){ if(step<steps){ floating.style.top=(startPos.y+deltaY*step)+"px"; step++; animationTimeouts.push(setTimeout(animateStep,duration/steps)); } 
+  else{ setColor(row,col,color); floating.style.display="none"; if(callback) callback(); scene="player_pick"; checkGameOver(); } }
   animateStep();
 }
-
-// ------------------- ФУНКЦИЯ ПОИСКА НАИМЕНЕЕ ЗАПОЛНЕННОГО СТОЛБЦА -------------------
-function findLeastFilledCol() {
-  let minFill = gameConfig.rows;
-  let cols = [];
-  for(let c=0; c < gameConfig.cols; c++) {
-    let fill = 0;
-    for(let r=0; r < gameConfig.rows; r++) {
-      if(getColor(r, c)) fill++;
-    }
-    if(fill < minFill) {
-      minFill = fill;
-      cols = [c];
-    } else if(fill === minFill) {
-      cols.push(c);
-    }
-  }
-  // возвращаем случайный из наименее занятых
-  return cols[Math.floor(Math.random()*cols.length)];
-}
-
-// ------------------- ГЕНЕРАЦИЯ КЛЕТОК ЗА ХОД (РАВНОМЕРНОЕ РАСПРЕДЕЛЕНИЕ) -------------------
-function generateCellsPerMoveWithFall() {
-  let total = gameConfig.cellsPerMove;
-  let calls = 0;
-
-  function nextCell() {
-    if (calls < total) {
-      let col = findLeastFilledCol();
-      let color = gameConfig.colors[Math.floor(Math.random() * gameConfig.colors.length)];
-      let row = findDropRow(col);
-
-      if (row === -1) {
-        processBoard(true);
-      } else {
-        generateCellWithFall(nextCell, col, color);
-        calls++;
-      }
-    } else {
-      processBoard(true);
-    }
-  }
-  nextCell();
-}
+function generateCellsPerMoveWithFall(){ let count=0; function nextCell(){ if(count<gameConfig.cellsPerMove){ generateCellWithFall(()=>{ count++; nextCell(); }); } else { processBoard(true); } } nextCell(); }
 
 // ------------------- ИНИЦИАЛИЗАЦИЯ -------------------
 function initBoard(n){
@@ -273,29 +111,7 @@ function initBoard(n){
   scoreBoard.textContent=isStandardGame?("Очки: "+score+" | Рекорд: "+highScore):"";
   gameOver=false; gameOverOverlay.style.display="none";
 
-  // --- Улучшенная генерация начальных клеток ---
-  let positions = [];
-  for(let c=0;c<gameConfig.cols;c++)
-    for(let r=0;r<gameConfig.rows;r++)
-      positions.push([r, c]);
-  shuffle(positions);
-
-  let placed = 0;
-  let possibleColors = [];
-  for(let i = 0; i < n; i++)
-    possibleColors.push(gameConfig.colors[Math.floor(Math.random() * gameConfig.colors.length)]);
-  shuffle(possibleColors);
-
-  for(let i=0; placed < n && i < positions.length; i++) {
-    const [row, col] = positions[i];
-    if(!getColor(row, col)){
-      const color = possibleColors[placed];
-      setColor(row, col, color);
-      if(findMatches().length === 0) placed++;
-      else setColor(row, col, null);
-    }
-  }
-  // --- конец генерации ---
+  let placed=0; while(placed<n){ const col=Math.floor(Math.random()*gameConfig.cols); const color=gameConfig.colors[Math.floor(Math.random()*gameConfig.colors.length)]; const row=findDropRow(col); if(row===-1) continue; setColor(row,col,color); if(findMatches().length===0) placed++; else setColor(row,col,null); }
   checkGameOver();
 }
 
