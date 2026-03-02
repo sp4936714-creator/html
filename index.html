@@ -150,7 +150,7 @@ function checkGameOver(){
       gameOverOverlay.style.display="flex";
       if(isStandardGame) {
           saveHighScore(score);
-          sendScore(score); // --- отправка очков на сервер
+          sendScore(score);
       }
       return true;
     }
@@ -158,7 +158,7 @@ function checkGameOver(){
   return false;
 }
 
-// ------------------- ОТПРАВКА ОЧКОВ НА СЕРВЕР (добавлено) -------------------
+// ------------------- ОТПРАВКА ОЧКОВ НА СЕРВЕР -------------------
 function sendScore(score) {
   fetch("http://127.0.0.1:5000/score", {
     method: "POST",
@@ -181,22 +181,84 @@ function saveHighScore(score){ if(score>highScore){ highScore=score; localStorag
 // ------------------- ПОЗИЦИИ -------------------
 function cellPosition(r,c){ const rect=table.rows[r].cells[c].getBoundingClientRect(); const wrap=boardWrapper.getBoundingClientRect(); return {x:rect.left-wrap.left, y:rect.top-wrap.top}; }
 
-// ------------------- ГЕНЕРАЦИЯ -------------------
-function generateCellWithFall(callback){
+// ------------------- ГЕНЕРАЦИЯ КЛЕТОК С АНИМАЦИЕЙ -------------------
+function generateCellWithFall(callback, col, color) {
   if(gameOver) return;
-  const col=Math.floor(Math.random()*gameConfig.cols);
-  const color=gameConfig.colors[Math.floor(Math.random()*gameConfig.colors.length)];
-  const row=findDropRow(col); if(row===-1){ if(callback) callback(); return; }
+  if(typeof col === 'undefined')
+    col = Math.floor(Math.random()*gameConfig.cols);
+  if(typeof color === 'undefined')
+    color = gameConfig.colors[Math.floor(Math.random()*gameConfig.colors.length)];
+  const row = findDropRow(col);
+  if(row === -1){ if(callback) callback(); return; }
   const startPos={x:cellPosition(0,col).x, y:cellPosition(0,col).y-60};
   const endPos=cellPosition(row,col);
-  floating.style.left=startPos.x+"px"; floating.style.top=startPos.y+"px"; floating.style.backgroundColor=color; floating.style.display="block";
+  floating.style.left=startPos.x+"px";
+  floating.style.top=startPos.y+"px";
+  floating.style.backgroundColor=color;
+  floating.style.display="block";
   playSound(600,0.05,0.1);
-  scene="animating"; const duration=400; const steps=20; let step=0; const deltaY=(endPos.y-startPos.y)/steps;
-  function animateStep(){ if(step<steps){ floating.style.top=(startPos.y+deltaY*step)+"px"; step++; animationTimeouts.push(setTimeout(animateStep,duration/steps)); } 
-  else{ setColor(row,col,color); floating.style.display="none"; if(callback) callback(); scene="player_pick"; checkGameOver(); } }
+  scene="animating";
+  const duration=400;
+  const steps=20;
+  let step=0;
+  const deltaY=(endPos.y-startPos.y)/steps;
+  function animateStep(){
+    if(step<steps){
+      floating.style.top=(startPos.y+deltaY*step)+"px";
+      step++;
+      animationTimeouts.push(setTimeout(animateStep,duration/steps));
+    }
+    else{
+      setColor(row,col,color);
+      floating.style.display="none";
+      if(callback) callback();
+      scene="player_pick";
+      checkGameOver();
+    }
+  }
   animateStep();
 }
-function generateCellsPerMoveWithFall(){ let count=0; function nextCell(){ if(count<gameConfig.cellsPerMove){ generateCellWithFall(()=>{ count++; nextCell(); }); } else { processBoard(true); } } nextCell(); }
+
+// ------------------- УЛУЧШЕННАЯ ГЕНЕР��ЦИЯ КЛЕТОК ЗА ХОД -------------------
+function generateCellsPerMoveWithFall() {
+  // генерируем перемешанный список столбцов
+  let colsList = [];
+  for (let i = 0; i < gameConfig.cols; i++) colsList.push(i);
+  shuffle(colsList);
+
+  let total = gameConfig.cellsPerMove;
+  let calls = 0;
+
+  function nextCell() {
+    if (calls < total) {
+      // выбираем столбец из перемешанного списка
+      let col = colsList[calls % colsList.length];
+      let color = gameConfig.colors[Math.floor(Math.random() * gameConfig.colors.length)];
+      let row = findDropRow(col);
+      // если столбец переполнен, ищем первый доступный
+      if (row === -1) {
+        for (let c = 0; c < gameConfig.cols; c++) {
+          let altRow = findDropRow(c);
+          if (altRow !== -1) {
+            col = c;
+            row = altRow;
+            break;
+          }
+        }
+      }
+      if (row !== -1) {
+        generateCellWithFall(nextCell, col, color);
+        calls++;
+      } else {
+        // все столбцы заполнены
+        processBoard(true);
+      }
+    } else {
+      processBoard(true);
+    }
+  }
+  nextCell();
+}
 
 // ------------------- ИНИЦИАЛИЗАЦИЯ -------------------
 function initBoard(n){
@@ -223,7 +285,6 @@ function initBoard(n){
     possibleColors.push(gameConfig.colors[Math.floor(Math.random() * gameConfig.colors.length)]);
   shuffle(possibleColors);
 
-  // ставим случайные цвета в случайные позиции, не допуская совпадений
   for(let i=0; placed < n && i < positions.length; i++) {
     const [row, col] = positions[i];
     if(!getColor(row, col)){
@@ -233,7 +294,6 @@ function initBoard(n){
       else setColor(row, col, null);
     }
   }
-  // --- конец генерации ---
 
   checkGameOver();
 }
