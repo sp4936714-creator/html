@@ -219,39 +219,42 @@ function generateCellWithFall(callback, col, color) {
   animateStep();
 }
 
-// ------------------- УЛУЧШЕННАЯ ГЕНЕР��ЦИЯ КЛЕТОК ЗА ХОД -------------------
-function generateCellsPerMoveWithFall() {
-  // генерируем перемешанный список столбцов
-  let colsList = [];
-  for (let i = 0; i < gameConfig.cols; i++) colsList.push(i);
-  shuffle(colsList);
+// ------------------- ФУНКЦИЯ ПОИСКА НАИМЕНЕЕ ЗАПОЛНЕННОГО СТОЛБЦА -------------------
+function findLeastFilledCol() {
+  let minFill = gameConfig.rows;
+  let cols = [];
+  for(let c=0; c < gameConfig.cols; c++) {
+    let fill = 0;
+    for(let r=0; r < gameConfig.rows; r++) {
+      if(getColor(r, c)) fill++;
+    }
+    if(fill < minFill) {
+      minFill = fill;
+      cols = [c];
+    } else if(fill === minFill) {
+      cols.push(c);
+    }
+  }
+  // возвращаем случайный из наименее занятых
+  return cols[Math.floor(Math.random()*cols.length)];
+}
 
+// ------------------- ГЕНЕРАЦИЯ КЛЕТОК ЗА ХОД (РАВНОМЕРНОЕ РАСПРЕДЕЛЕНИЕ) -------------------
+function generateCellsPerMoveWithFall() {
   let total = gameConfig.cellsPerMove;
   let calls = 0;
 
   function nextCell() {
     if (calls < total) {
-      // выбираем столбец из перемешанного списка
-      let col = colsList[calls % colsList.length];
+      let col = findLeastFilledCol();
       let color = gameConfig.colors[Math.floor(Math.random() * gameConfig.colors.length)];
       let row = findDropRow(col);
-      // если столбец переполнен, ищем первый доступный
+
       if (row === -1) {
-        for (let c = 0; c < gameConfig.cols; c++) {
-          let altRow = findDropRow(c);
-          if (altRow !== -1) {
-            col = c;
-            row = altRow;
-            break;
-          }
-        }
-      }
-      if (row !== -1) {
+        processBoard(true);
+      } else {
         generateCellWithFall(nextCell, col, color);
         calls++;
-      } else {
-        // все столбцы заполнены
-        processBoard(true);
       }
     } else {
       processBoard(true);
@@ -275,12 +278,10 @@ function initBoard(n){
   for(let c=0;c<gameConfig.cols;c++)
     for(let r=0;r<gameConfig.rows;r++)
       positions.push([r, c]);
-
   shuffle(positions);
 
   let placed = 0;
   let possibleColors = [];
-  // используем перемешанные цвета для разнообразия, если клеток больше цветов — повторяем цвета
   for(let i = 0; i < n; i++)
     possibleColors.push(gameConfig.colors[Math.floor(Math.random() * gameConfig.colors.length)]);
   shuffle(possibleColors);
@@ -294,7 +295,7 @@ function initBoard(n){
       else setColor(row, col, null);
     }
   }
-
+  // --- конец генерации ---
   checkGameOver();
 }
 
